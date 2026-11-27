@@ -3,4 +3,8 @@
 # Replace or extend this script in downstream problem repos (e.g. barrier_redteam.py, cycle_hunter.py).
 set -euo pipefail
 
+if [ -f scripts/native_cache.py ]; then
+  python3 scripts/native_cache.py --self-test
+fi
+
 echo "PASS: Default solve-anything search CI hook (add problem-specific red-team & search smoke tests here)."
