@@ -15,8 +15,8 @@ FORBIDDEN = [
     (re.compile(r"\badmit\b"), "admit"),
     (re.compile(r"\baxiom\b"), "axiom"),
     (re.compile(r"\bnative_decide\b"), "native_decide"),
-    (re.compile(r"\bLean\.ofReduceBool\b"), "Lean.ofReduceBool"),
-    (re.compile(r"\bLean\.trustCompiler\b"), "Lean.trustCompiler"),
+    (re.compile(r"\b(?:Lean\s*\.\s*)?ofReduceBool\b"), "Lean.ofReduceBool"),
+    (re.compile(r"\b(?:Lean\s*\.\s*)?trustCompiler\b"), "Lean.trustCompiler"),
     (re.compile(r"\bimplemented_by\b"), "implemented_by"),
     (re.compile(r"\bextern\b"), "extern"),
     (re.compile(r"\bset_option\b"), "set_option"),
@@ -25,9 +25,15 @@ FORBIDDEN = [
     (re.compile(r"\brun_tac\b|\brun_cmd\b|\bby_elab\b"), "metaprogramming escape hatch"),
 ]
 DECL_RE = re.compile(
-    r"^(?:@\[[^\]]*\]\s*)*(?:(?:public|private|protected|noncomputable|partial)\s+)*"
+    r"^\s*(?:@\[[^\]]*\]\s*)*(?:(?:public|private|protected|noncomputable|partial)\s+)*"
     r"(?:lemma|theorem|def)\s+(\S+)"
 )
+BOUNDARY_RE = re.compile(
+    r"^\s*(?:@\[[^\]]*\]\s*)*(?:(?:public|private|protected|noncomputable|partial|local|scoped)\s+)*"
+    r"(?:structure|inductive|class|instance|abbrev|opaque|example|section|namespace|end|"
+    r"variable|universe|open|attribute|macro|syntax|notation|infix[lr]?|prefix|postfix|export)\b"
+)
+CHAR_ESC_RE = re.compile(r"^'\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|.)'")
 
 
 def load_config(root_dir: pathlib.Path = pathlib.Path(".")) -> tuple[pathlib.Path, int, int, int]:
@@ -86,6 +92,17 @@ def _strip_line_comments_and_strings(
             i += 1
             continue
 
+        if line[i] == "'" and (i == 0 or not (line[i - 1].isalnum() or line[i - 1] in "_?!'")):
+            m_esc = CHAR_ESC_RE.match(line[i:])
+            if m_esc:
+                span = len(m_esc.group(0))
+                out.append(" " * span)
+                i += span
+                continue
+            if i + 2 < n and line[i + 1] not in ("'", "\\") and line[i + 2] == "'":
+                out.append("   ")
+                i += 3
+                continue
         if line[i] == '"':
             in_string = True
             out.append('"')
@@ -143,6 +160,13 @@ def check_file(
                         f"{path}:{dstart}: `{dname}` spans {idx - dstart} lines (> {max_proof_lines})"
                     )
             cur_decl = (m.group(1), idx)
+        elif cur_decl is not None and BOUNDARY_RE.match(code_part):
+            dname, dstart = cur_decl
+            if idx - dstart > max_proof_lines:
+                errs.append(
+                    f"{path}:{dstart}: `{dname}` spans {idx - dstart} lines (> {max_proof_lines})"
+                )
+            cur_decl = None
 
     if cur_decl is not None:
         dname, dstart = cur_decl
@@ -181,7 +205,11 @@ def run_self_test() -> int:
             ("axiom", "axiom bad_ax : False"),
             ("native_decide", "theorem t : True := by native_decide"),
             ("Lean.ofReduceBool", "theorem t := Lean.ofReduceBool"),
+            ("Lean.ofReduceBool", "open Lean in\ntheorem t := ofReduceBool"),
             ("Lean.trustCompiler", "theorem t := Lean.trustCompiler"),
+            ("Lean.trustCompiler", "open Lean in\ntheorem t := trustCompiler"),
+            ("sorry", "def c : Char := '\"'\ntheorem t : True := by sorry"),
+            ("sorry", "def c : Char := '\\\"'\ntheorem t : True := by sorry"),
             ("implemented_by", "@[implemented_by fast_impl] def slow : Nat := 0"),
             ("extern", "@[extern \"c_fn\"] opaque ext_fn : Nat → Nat"),
             ("set_option", "set_option maxHeartbeats 0 in\ntheorem t : True := by trivial"),
@@ -219,6 +247,26 @@ def run_self_test() -> int:
         )
         if not any("spans 8 lines (> 5)" in e for e in check_file(long_proof, 100, 50, 5)):
             raise AssertionError("Failed to catch max_proof_lines violation")
+
+        indented_proof = root / "IndentedProof.lean"
+        indented_proof.write_text(
+            "namespace Foo\n  theorem long_ind : True := by\n"
+            + "\n".join(["    have h := trivial"] * 6)
+            + "\n    exact trivial\nend Foo\n",
+            encoding="utf-8",
+        )
+        if not any("`long_ind` spans 8 lines (> 5)" in e for e in check_file(indented_proof, 100, 50, 5)):
+            raise AssertionError("Failed to catch indented max_proof_lines violation")
+
+        struct_after = root / "StructAfter.lean"
+        struct_after.write_text(
+            "theorem short_p : True := by trivial\nstructure Big where\n"
+            + "\n".join([f"  f{k} : Nat" for k in range(10)])
+            + "\n",
+            encoding="utf-8",
+        )
+        if check_file(struct_after, 100, 50, 5):
+            raise AssertionError("False positive: structure lines counted against preceding theorem")
 
     print("PASS: scripts/check_source_guards.py self-test passed (all escape hatches & limits enforced).")
     return 0

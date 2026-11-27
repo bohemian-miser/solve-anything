@@ -60,7 +60,8 @@ def assert_deterministic_pair(payload_a: dict[str, Any], payload_b: dict[str, An
     """Verify two run payloads (e.g. `t=1` vs `t=N`) match bit-for-bit on `deterministic_sha256`."""
     sha_a = verify_artifact_payload(payload_a, require_canonical_sha256=True)
     sha_b = verify_artifact_payload(payload_b, require_canonical_sha256=True)
-    assert sha_a is not None and sha_b is not None
+    if sha_a is None or sha_b is None:
+        raise ValueError("Expected non-null deterministic_sha256 digests from both payloads")
     if sha_a != sha_b:
         raise AssertionError(f"Non-deterministic canonical digest across runs: {sha_a} != {sha_b}")
     return sha_a
@@ -136,8 +137,15 @@ def main() -> int:
         print("PASS: No JSON search artifacts to verify.")
         return 0
 
+    failed = 0
     for path in targets:
-        verify_artifact_file(path, require_canonical_sha256=not args.allow_missing_sha)
+        try:
+            verify_artifact_file(path, require_canonical_sha256=not args.allow_missing_sha)
+        except (ValueError, OSError) as exc:
+            print(f"FAIL: {path}: {exc}", file=sys.stderr)
+            failed += 1
+    if failed:
+        return 1
     print(f"PASS: Verified {len(targets)} strict RFC-8259 JSON artifact(s).")
     return 0
 
