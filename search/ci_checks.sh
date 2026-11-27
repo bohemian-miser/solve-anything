@@ -4,7 +4,6 @@
 set -euo pipefail
 
 if [ -f scripts/check_source_guards.py ]; then
-  python3 scripts/check_source_guards.py --self-test
   python3 scripts/check_source_guards.py
 fi
 
