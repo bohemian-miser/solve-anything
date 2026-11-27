@@ -33,6 +33,7 @@ from typing import Any
 DEFAULT_SOURCE_EXTENSIONS = frozenset(
     {".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".rs", ".cu", ".cuh"}
 )
+DEFAULT_SOURCE_FILENAMES = frozenset({"Cargo.toml", "Cargo.lock"})
 
 
 def _collect_source_files(
@@ -44,22 +45,42 @@ def _collect_source_files(
         items = list(source_paths)
 
     collected: dict[pathlib.Path, str] = {}
+    explicit_files: list[pathlib.Path] = []
     for raw in items:
         p = pathlib.Path(raw)
         if not p.exists():
             raise FileNotFoundError(f"Source path does not exist: {p}")
         if p.is_file():
-            collected[p.resolve()] = p.name
+            explicit_files.append(p)
         elif p.is_dir():
             for child in sorted(p.rglob("*")):
                 if not child.is_file():
                     continue
                 if any(part.startswith(".") or part == "target" for part in child.relative_to(p).parts):
                     continue
-                if child.suffix.lower() in DEFAULT_SOURCE_EXTENSIONS:
+                if (
+                    child.suffix.lower() in DEFAULT_SOURCE_EXTENSIONS
+                    or child.name in DEFAULT_SOURCE_FILENAMES
+                ):
                     collected[child.resolve()] = child.relative_to(p).as_posix()
         else:
             raise ValueError(f"Unsupported source path type: {p}")
+
+    if explicit_files:
+        resolved_explicit = [f.resolve() for f in explicit_files]
+        unique_explicit = set(resolved_explicit)
+        common_root: pathlib.Path | None = None
+        if len(unique_explicit) > 1:
+            try:
+                common_root = pathlib.Path(os.path.commonpath([str(f) for f in unique_explicit]))
+            except ValueError:
+                common_root = None
+        for orig, resolved in zip(explicit_files, resolved_explicit):
+            if common_root is not None:
+                label = resolved.relative_to(common_root).as_posix()
+            else:
+                label = orig.name
+            collected.setdefault(resolved, label)
 
     if not collected:
         raise ValueError("No source files resolved from source_paths")
@@ -227,6 +248,40 @@ def run_self_test() -> int:
         if bin_modified == bin1:
             raise AssertionError("Header modification failed to invalidate content hash")
         h1.write_text(h_src, encoding="utf-8")
+
+        # Test duplicate basenames across subdirectories preserve relative path context.
+        for wt in (wt1, wt2):
+            (wt / "a").mkdir()
+            (wt / "b").mkdir()
+            (wt / "a" / "util.c").write_text("int util_a(void) { return 1; }\n", encoding="utf-8")
+            (wt / "b" / "util.c").write_text("int util_b(void) { return 2; }\n", encoding="utf-8")
+        dup1 = cached_binary_path("dup_test", [wt1 / "a" / "util.c", wt1 / "b" / "util.c"], cache_dir=cache)
+        dup2 = cached_binary_path("dup_test", [wt2 / "b" / "util.c", wt2 / "a" / "util.c"], cache_dir=cache)
+        if dup1 != dup2:
+            raise AssertionError(f"Duplicate-basename cross-worktree mismatch: {dup1} != {dup2}")
+        (wt1 / "a" / "util.c").write_text("int util_b(void) { return 2; }\n", encoding="utf-8")
+        (wt1 / "b" / "util.c").write_text("int util_a(void) { return 1; }\n", encoding="utf-8")
+        dup_swapped = cached_binary_path("dup_test", [wt1 / "a" / "util.c", wt1 / "b" / "util.c"], cache_dir=cache)
+        if dup_swapped == dup1:
+            raise AssertionError("Swapping contents across duplicate-basename paths failed to change hash")
+
+        # Test Rust crate directory scanning includes Cargo.toml and Cargo.lock (while ignoring target/).
+        crate = root / "rust_crate"
+        (crate / "src").mkdir(parents=True)
+        (crate / "target" / "debug").mkdir(parents=True)
+        (crate / "src" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+        (crate / "Cargo.toml").write_text('[package]\nname = "demo"\nversion = "0.1.0"\n', encoding="utf-8")
+        (crate / "Cargo.lock").write_text('version = 3\n', encoding="utf-8")
+        (crate / "target" / "debug" / "junk.rs").write_text("ignored\n", encoding="utf-8")
+        rust_bin1 = cached_binary_path("rust_demo", [crate], cache_dir=cache)
+        (crate / "Cargo.toml").write_text('[package]\nname = "demo"\nversion = "0.2.0"\n', encoding="utf-8")
+        rust_bin2 = cached_binary_path("rust_demo", [crate], cache_dir=cache)
+        if rust_bin2 == rust_bin1:
+            raise AssertionError("Cargo.toml edit failed to invalidate Rust crate directory hash")
+        (crate / "Cargo.lock").write_text('version = 4\n', encoding="utf-8")
+        rust_bin3 = cached_binary_path("rust_demo", [crate], cache_dir=cache)
+        if rust_bin3 == rust_bin2:
+            raise AssertionError("Cargo.lock edit failed to invalidate Rust crate directory hash")
 
         # Test atomic_compile with Python-emulated compiler (and real cc if available).
         py_out = cache / "py_tool"

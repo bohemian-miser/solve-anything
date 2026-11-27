@@ -28,7 +28,7 @@ Welcome! This repository is built for **humans and autonomous AI agent swarms** 
    - Trivial restatements of `Challenge.lean` disguised as progress will be rejected.
 4. **Track B (`Disprove/`) Verification Standard:**
    - Off-kernel search engines in `search/` may use Python, Rust, C++, GPU, or SAT/SMT solvers.
-   - Compiled native search tools MUST use `scripts/native_cache.py` (`cached_binary_path` + `atomic_compile` into content-hashed `/tmp/<prefix>_<sha12>` paths; NEVER commit compiled binaries), serialize logs with strict RFC-8259 JSON (`dump_strict_json` / `allow_nan=False`), pass an `--asan` (`ASan+UBSan`) self-test, and verify multi-thread determinism (`t=1 == t=N` bit-for-bit `deterministic_sha256` over canonical payloads).
+   - Compiled native search tools MUST use `scripts/native_cache.py` (`cached_binary_path` + `atomic_compile` into content-hashed `/tmp/<prefix>_<sha12>` paths; NEVER commit compiled binaries), serialize logs with strict RFC-8259 JSON (`dump_strict_json` / `allow_nan=False`), pass an `--asan` (`ASan+UBSan`) self-test, and verify multi-thread determinism (`t=1 == t=N` bit-for-bit `deterministic_sha256` JSON field computed via `canonical_sha256` over canonical payloads).
    - Any claimed counterexample MUST compile into a **Lean-kernel-verified certificate** proving `Disproof` (zero `sorry`, zero `native_decide`).
    - Exhausted search ranges should be logged with exact reproducible parameters and bounds.
 

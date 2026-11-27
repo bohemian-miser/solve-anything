@@ -14,12 +14,13 @@ import json
 import os
 import pathlib
 import re
+import tempfile
 import tomllib
 
 
 LEAN_DECL_RE = re.compile(
-    r"^(?:@\[[^\]]*\]\s*)*(?:(?:public|private|protected|noncomputable|unsafe|partial)\s+)*"
-    r"(?:theorem|lemma)\s+([A-Za-z0-9_.']+)"
+    r"^(?:@\[[^\]]*\]\s*|(?:public|private|protected|noncomputable|unsafe|partial)\s+)*"
+    r"(?:theorem|lemma)\s+([^\s:({[]+)"
 )
 
 
@@ -46,14 +47,38 @@ def load_problem_meta(root_dir: pathlib.Path = pathlib.Path(".")) -> dict[str, s
 
 
 def _strip_lean_comments(lines: list[str]) -> list[tuple[int, str]]:
-    """Strip `--` line comments and nested `/- ... -/` block comments from Lean source lines."""
+    """Strip `--` line comments, nested `/- ... -/` block comments, and `"..."` string literals."""
     stripped_lines: list[tuple[int, str]] = []
     comment_depth = 0
+    in_string = False
     for lineno, line in enumerate(lines, 1):
         out: list[str] = []
         i = 0
         n = len(line)
         while i < n:
+            if in_string:
+                if line[i] == "\\":
+                    if i + 1 < n:
+                        out.append("  ")
+                        i += 2
+                    else:
+                        out.append(" ")
+                        i += 1
+                    continue
+                if line[i] == '"':
+                    in_string = False
+                    out.append('"')
+                    i += 1
+                    continue
+                out.append(" ")
+                i += 1
+                continue
+
+            if comment_depth == 0 and line[i] == '"':
+                in_string = True
+                out.append('"')
+                i += 1
+                continue
             if comment_depth == 0 and line[i : i + 2] == "--":
                 break
             if line[i : i + 2] == "/-":
@@ -90,9 +115,13 @@ def collect_lean_stats(
     lean_files = 0
     lean_loc = 0
     for path in sorted(lean_root.rglob("*.lean")):
-        if ".lake" in path.parts:
-            continue
         resolved = path.resolve()
+        try:
+            rel_parts = resolved.relative_to(root_resolved).parts
+        except ValueError:
+            rel_parts = path.relative_to(lean_root).parts
+        if ".lake" in rel_parts:
+            continue
         if resolved == challenge_resolved or scripts_resolved in resolved.parents:
             continue
         lean_files += 1
@@ -189,13 +218,15 @@ def render_html(payload: dict) -> str:
     refuted = payload["refuted"]
 
     def badge(text: str, cls: str) -> str:
-        return f'<span class="badge {cls}">{html.escape(text)}</span>'
+        safe_cls = html.escape(cls, quote=True)
+        return f'<span class="badge {safe_cls}">{html.escape(text)}</span>'
 
     rows_html = []
     for n in nodes:
         nid = n["id"]
         status = n.get("status", "OPEN_SUBGOAL")
         track = n.get("track", "Core")
+        track_slug = re.sub(r"[^a-z0-9_-]+", "-", track.lower()).strip("-") or "unknown"
         claim = claims.get(nid)
         if status == "PROVED":
             st_html = badge("PROVED", "ok")
@@ -212,7 +243,7 @@ def render_html(payload: dict) -> str:
         rows_html.append(
             f"<tr>"
             f"<td><code>{html.escape(nid)}</code></td>"
-            f"<td>{badge(track, 'track-' + track.lower())}</td>"
+            f"<td>{badge(track, 'track-' + track_slug)}</td>"
             f"<td>{st_html}</td>"
             f"<td><strong>{html.escape(n.get('title', ''))}</strong>"
             f"<div class='sub'>{html.escape(n.get('barrier_notes', ''))}</div></td>"
@@ -328,12 +359,91 @@ def render_html(payload: dict) -> str:
 """
 
 
+def run_self_test() -> int:
+    """Verify Lean comment/string parsing, Unicode/modifier decls, `.lake` filter, and HTML escaping."""
+    with tempfile.TemporaryDirectory(prefix="dashboard_selftest_") as tmp:
+        # Place root inside a parent named `.lake` to ensure relative `.lake` filtering is used.
+        root = pathlib.Path(tmp) / ".lake" / "repo"
+        prob = root / "Problem"
+        lake_sub = prob / ".lake"
+        prob.mkdir(parents=True)
+        lake_sub.mkdir()
+
+        (lake_sub / "Ignored.lean").write_text("theorem should_ignore : True := by trivial\n", encoding="utf-8")
+        (prob / "Adversarial.lean").write_text(
+            "\n".join(
+                [
+                    'def s1 : String := "/- not a block comment"',
+                    'def s2 : String := "escaped \\"/- still string\\"',
+                    'theorem fake_in_string : True := by trivial',
+                    '"',
+                    "/-- Docstring with unmatched quote \"",
+                    "theorem fake_in_comment : True := by trivial",
+                    "-/",
+                    "@[simp] private noncomputable theorem real_thm1 : True := by trivial",
+                    "private @[simp] theorem real_thm2 : True := by trivial",
+                    "lemma h₁ : True := by trivial",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        decls, lean_files, _ = collect_lean_stats(prob, root_dir=root)
+        names = [d["name"] for d in decls]
+        if lean_files != 1 or names != ["real_thm1", "real_thm2", "h₁"]:
+            raise AssertionError(f"Unexpected Lean stats: files={lean_files}, decls={names}")
+
+        html_out = render_html(
+            {
+                "meta": {
+                    "name": "test",
+                    "title": "Test",
+                    "tagline": "Tag",
+                    "repo": "org/repo",
+                },
+                "generated_at": "2026-01-01T00:00:00Z",
+                "summary": {
+                    "proved": 0,
+                    "total_nodes": 1,
+                    "open_unclaimed": 1,
+                    "active_claims": 0,
+                    "lean_theorems": len(decls),
+                    "lean_files": lean_files,
+                    "lean_loc": 10,
+                    "refuted": 0,
+                },
+                "nodes": [
+                    {
+                        "id": "N1",
+                        "track": 'Prove" onmouseover="alert(1)',
+                        "status": "OPEN_SUBGOAL",
+                        "title": "Test",
+                    }
+                ],
+                "active_claims": {},
+                "lean_theorems": decls,
+                "refuted": [],
+            }
+        )
+        if 'onmouseover="alert(1)"' in html_out:
+            raise AssertionError("Unescaped HTML attribute injection detected in render_html output")
+        if 'class="badge track-prove-onmouseover-alert-1"' not in html_out:
+            raise AssertionError("Sanitized track CSS class missing from render_html output")
+
+    print("PASS: scripts/build_dashboard.py self-test passed (Lean parser & XSS escaping).")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Build solve-anything static Pages dashboard")
     p.add_argument("--out", type=pathlib.Path, default=pathlib.Path("site"))
     p.add_argument("--claims", type=pathlib.Path, default=None)
     p.add_argument("--root", type=pathlib.Path, default=pathlib.Path("."))
+    p.add_argument("--self-test", action="store_true", help="Run built-in unit self-tests")
     args = p.parse_args()
+    if args.self_test:
+        return run_self_test()
 
     root_dir = args.root
     meta = load_problem_meta(root_dir)
