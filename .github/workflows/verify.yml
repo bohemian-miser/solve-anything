@@ -1,0 +1,92 @@
+name: Verify Theorem Swarm
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check frozen challenge & verification files (PRs only)
+        if: github.event_name == 'pull_request'
+        run: |
+          python3 scripts/check_challenge_frozen.py "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+
+      - name: Check Lean source hygiene guards
+        run: python3 scripts/check_source_guards.py
+
+      - name: Cache elan toolchain and Lake build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            .lake/build
+          key: lean-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-${{ hashFiles('**/*.lean') }}
+          restore-keys: |
+            lean-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-
+            lean-${{ runner.os }}-
+
+      - name: Install elan if not cached
+        run: |
+          if [ ! -x "$HOME/.elan/bin/lake" ]; then
+            curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain none
+          fi
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Build all Lean targets (warnings as errors)
+        run: lake build
+
+      - name: Audit axioms (standard axioms only; no sorryAx or native_decide)
+        run: |
+          set -euo pipefail
+          OUT=$(lake env lean scripts/PrintAxioms.lean 2>&1)
+          echo "$OUT"
+          if echo "$OUT" | grep -Eq 'sorryAx|Lean\.ofReduceBool|Lean\.trustCompiler|error:'; then
+            echo "FAIL: Forbidden axiom or error detected in PrintAxioms.lean output!" >&2
+            exit 1
+          fi
+          python3 - <<'PY' "$OUT"
+          import re, sys
+          allowed = {"propext", "Classical.choice", "Quot.sound"}
+          bad = []
+          for line in sys.argv[1].splitlines():
+              m = re.search(r"depends on axioms: \[(.*)\]", line)
+              if m:
+                  axioms = {a.strip() for a in m.group(1).split(",") if a.strip()}
+                  extra = sorted(axioms - allowed)
+                  if extra:
+                      bad.append((line, extra))
+          if bad:
+              for line, extra in bad:
+                  print(f"FAIL: Non-standard axiom(s) {extra} in: {line}", file=sys.stderr)
+              sys.exit(1)
+          print("PASS: All audited theorems use standard Lean axioms only.")
+          PY
+
+      - name: Run problem-specific barrier & search CI hook (from problem.toml)
+        run: |
+          python3 - <<'PY'
+          import pathlib, subprocess, sys, tomllib
+          cfg = tomllib.loads(pathlib.Path("problem.toml").read_text(encoding="utf-8"))
+          hook = cfg.get("search", {}).get("ci_hook", "").strip()
+          if hook and pathlib.Path(hook).exists():
+              print(f"Running search CI hook: {hook}")
+              res = subprocess.run(["bash", hook], check=False)
+              sys.exit(res.returncode)
+          print("No search CI hook configured; skipping.")
+          PY

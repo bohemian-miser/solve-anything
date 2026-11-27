@@ -1,0 +1,59 @@
+# Frontier Research DAG (`solve-anything` template)
+# States: PROVED | OPEN_SUBGOAL | IN_PROGRESS | REFUTED | BARRIER_BLOCKED
+# Tracks: Core | Known | Prove | Disprove | Search
+
+[meta]
+schema = "solve-anything-frontier/v1"
+frozen_challenge = "Challenge.lean"
+
+[[node]]
+id = "CORE-001"
+track = "Core"
+status = "PROVED"
+title = "Frozen Challenge statement and counterexample bridge lemma (Track B -> Disproof)"
+lean_file = "Problem/Core/Basic.lean"
+needs = []
+
+[[node]]
+id = "DISPROVE-001"
+track = "Disprove"
+status = "PROVED"
+title = "Kernel-verified CounterexampleCert checker implying Disproof"
+lean_file = "Problem/Disprove/Cert.lean"
+needs = ["CORE-001"]
+
+[[node]]
+id = "CORE-002"
+track = "Core"
+status = "OPEN_SUBGOAL"
+title = "Formalized barrier counterexamples (nearby variants where the conjecture is known to fail)"
+target_file = "Problem/Core/Barriers.lean"
+needs = ["CORE-001"]
+barrier_notes = "Anchor review/barrier-check.md with kernel-verified counterexamples to weakened variants."
+
+[[node]]
+id = "KNOWN-001"
+track = "Known"
+status = "OPEN_SUBGOAL"
+title = "Formalize foundational known literature results (useful to both Track A and Track B)"
+target_file = "Problem/Known/Literature.lean"
+needs = ["CORE-001"]
+barrier_notes = "Replace with exact published theorems relevant to your conjecture."
+
+[[node]]
+id = "PROVE-A1"
+track = "Prove"
+status = "OPEN_SUBGOAL"
+title = "Track A primary proof strategy (replace with concrete reduction/subgoal)"
+target_file = "Problem/Prove/StrategyA.lean"
+needs = ["CORE-002", "KNOWN-001"]
+barrier_notes = "Must explicitly explain where the strategy fails on the barrier variants in CORE-002."
+
+[[node]]
+id = "DISPROVE-002"
+track = "Disprove"
+status = "OPEN_SUBGOAL"
+title = "Track B high-speed off-kernel counterexample hunter emitting Lean CounterexampleCerts"
+target_file = "search/hunter.py"
+needs = ["DISPROVE-001"]
+barrier_notes = "Target structured algebraic/computational danger zones beyond known lower bounds."

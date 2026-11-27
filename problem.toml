@@ -1,0 +1,33 @@
+# Single-file manifest driving all `solve-anything` CI workflows, guards, and dashboard generation.
+# Downstream problem instances edit ONLY this file, `Challenge.lean`, `<lean_root>/`, `frontier/`, and `search/`.
+
+[problem]
+name = "solve-anything"
+title = "Open Conjecture Template"
+tagline = "Drop in any Lean 4 conjecture to launch a kernel-verified dual-track (Prove + Disprove) crowd-swarm."
+lean_root = "Problem"
+namespace = "Problem"
+challenge_file = "Challenge.lean"
+conjecture_decl = "Problem.Conjecture"
+disproof_decl = "Problem.Disproof"
+
+[guards]
+max_line_length = 100
+max_file_lines = 1000
+max_proof_lines = 50
+frozen_files = [
+  "Challenge.lean",
+  "problem.toml",
+  "lean-toolchain",
+  "scripts/PrintAxioms.lean",
+  "scripts/check_challenge_frozen.py",
+  "scripts/check_source_guards.py",
+  ".github/workflows/verify.yml",
+  ".github/workflows/claims.yml",
+  ".github/workflows/dashboard.yml",
+  ".github/workflows/label-pr.yml",
+]
+
+[search]
+# Optional executable script run automatically by CI (e.g., barrier red-team + search smoke tests).
+ci_hook = "search/ci_checks.sh"

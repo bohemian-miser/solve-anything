@@ -1,0 +1,56 @@
+name: Auto-Label PR Track
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (trusted config only — never PR code)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Apply track labels from changed file paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess, tomllib
+
+          cfg = tomllib.loads(pathlib.Path("problem.toml").read_text(encoding="utf-8"))
+          root = cfg.get("problem", {}).get("lean_root", "Problem").rstrip("/")
+          repo = os.environ["REPO"]
+          pr = os.environ["PR_NUMBER"]
+          out = subprocess.check_output(
+              ["gh", "api", f"repos/{repo}/pulls/{pr}/files", "--paginate", "--jq", ".[].filename"],
+              text=True,
+          )
+          files = [l.strip() for l in out.splitlines() if l.strip()]
+          labels = set()
+          for f in files:
+              if f.startswith(f"{root}/Core/"):
+                  labels.add("track:core")
+              elif f.startswith(f"{root}/Known/"):
+                  labels.add("track:known")
+              elif f.startswith(f"{root}/Prove/"):
+                  labels.add("track:prove")
+              elif f.startswith(f"{root}/Disprove/"):
+                  labels.add("track:disprove")
+              elif f.startswith("search/"):
+                  labels.add("track:search")
+              elif f.startswith("frontier/REFUTED.md"):
+                  labels.add("track:refuted")
+              elif f.startswith("frontier/"):
+                  labels.add("track:frontier")
+          for lb in sorted(labels):
+              subprocess.run(["gh", "pr", "edit", pr, "-R", repo, "--add-label", lb], check=False)
+          print("Applied labels:", sorted(labels))
+          PY

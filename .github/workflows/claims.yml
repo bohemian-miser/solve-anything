@@ -1,0 +1,159 @@
+name: Frontier Claims Bot
+
+on:
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: frontier-claims
+  cancel-in-progress: false
+
+jobs:
+  handle-claims:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request == null &&
+       contains(github.event.issue.labels.*.name, 'claims') &&
+       (startsWith(github.event.comment.body, '/claim ') ||
+        startsWith(github.event.comment.body, '/release ') ||
+        startsWith(github.event.comment.body, '/status')))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (trusted)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+
+      - name: Checkout or initialize orphan claims branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p claims_repo
+          cd claims_repo
+          git init -b claims
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          if git ls-remote --exit-code --heads origin claims >/dev/null 2>&1; then
+            git fetch origin claims --depth=1
+            git checkout -B claims origin/claims
+          else
+            printf '{"schema":"solve-anything-claims/v1","claims":{}}\n' > claims.json
+          fi
+
+      - name: Process claim command or expire stale leases
+        id: proc
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          python3 - <<'PY'
+          import datetime as dt, json, os, pathlib, re, tomllib
+
+          now = dt.datetime.now(dt.timezone.utc)
+          frontier = tomllib.loads(pathlib.Path("main/frontier/FRONTIER.toml").read_text(encoding="utf-8"))
+          nodes = {n["id"]: n for n in frontier.get("node", [])}
+
+          claims_path = pathlib.Path("claims_repo/claims.json")
+          state = json.loads(claims_path.read_text(encoding="utf-8")) if claims_path.exists() else {"schema": "solve-anything-claims/v1", "claims": {}}
+          claims = state.setdefault("claims", {})
+
+          expired = []
+          for nid in list(claims.keys()):
+              info = claims[nid]
+              exp = dt.datetime.fromisoformat(info["expires_at"].replace("Z", "+00:00"))
+              if exp <= now or (nid in nodes and nodes[nid].get("status") == "PROVED"):
+                  expired.append(nid)
+                  del claims[nid]
+
+          event = os.environ.get("EVENT_NAME", "")
+          reply = ""
+          changed = bool(expired)
+
+          if event == "issue_comment":
+              body = os.environ.get("COMMENT_BODY", "").strip().splitlines()[0].strip()
+              user = os.environ.get("COMMENT_USER", "unknown")
+              parts = body.split()
+              cmd = parts[0] if parts else ""
+              nid = parts[1].strip() if len(parts) > 1 else ""
+
+              def open_suggestions(limit=5):
+                  avail = [k for k, v in nodes.items() if v.get("status") == "OPEN_SUBGOAL" and k not in claims]
+                  return ", ".join(f"`{x}`" for x in avail[:limit]) or "(none)"
+
+              if cmd == "/status":
+                  if claims:
+                      lines = [f"- `{k}` — claimed by @{v['user']} (expires `{v['expires_at']}`)" for k, v in sorted(claims.items())]
+                      reply = "**Active claims:**\n" + "\n".join(lines) + f"\n\n**Open & claimable:** {open_suggestions(8)}"
+                  else:
+                      reply = f"No active claims right now.\n\n**Open & claimable:** {open_suggestions(8)}"
+              elif not re.fullmatch(r"[A-Z]+-[A-Z0-9-]+", nid) or nid not in nodes:
+                  reply = f"@{user} Unknown frontier node `{nid}`. Try `/status` or pick one of: {open_suggestions()}"
+              elif cmd == "/claim":
+                  if nodes[nid].get("status") == "PROVED":
+                      reply = f"@{user} `{nid}` is already `PROVED` on `main`! Try an open node: {open_suggestions()}"
+                  elif nid in claims and claims[nid]["user"] != user:
+                      other = claims[nid]
+                      reply = (
+                          f"@{user} `{nid}` is currently claimed by @{other['user']} "
+                          f"(expires `{other['expires_at']}`). Try another open node: {open_suggestions()}"
+                      )
+                  else:
+                      expires = (now + dt.timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                      claims[nid] = {
+                          "user": user,
+                          "claimed_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                          "expires_at": expires,
+                      }
+                      changed = True
+                      reply = (
+                          f"@{user} Claimed **`{nid}`** ({nodes[nid].get('title', '')}) until `{expires}` (24h TTL).\n"
+                          f"Comment `/release {nid}` if you finish early or pivot."
+                      )
+              elif cmd == "/release":
+                  if nid not in claims:
+                      reply = f"@{user} `{nid}` is not currently claimed."
+                  elif claims[nid]["user"] != user:
+                      reply = f"@{user} `{nid}` is claimed by @{claims[nid]['user']}; only the claimant can release it early."
+                  else:
+                      del claims[nid]
+                      changed = True
+                      reply = f"@{user} Released **`{nid}`**. It is now open for other swarms."
+
+          state["updated_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+          if changed:
+              claims_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+          pathlib.Path("reply.md").write_text(reply, encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"changed={'true' if changed else 'false'}\n")
+              out.write(f"has_reply={'true' if bool(reply) else 'false'}\n")
+          PY
+
+      - name: Commit and push updated claims.json
+        if: steps.proc.outputs.changed == 'true'
+        working-directory: claims_repo
+        run: |
+          git add claims.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(claims): update active frontier leases"
+            git push origin HEAD:claims
+          fi
+
+      - name: Post reply comment on Frontier Claims issue
+        if: steps.proc.outputs.has_reply == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" -R "${{ github.repository }}" --body-file reply.md

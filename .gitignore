@@ -1,0 +1,11 @@
+.lake/
+lake-packages/
+__pycache__/
+*.pyc
+.DS_Store
+*.olean
+*.ilean
+*.trace
+*.log
+search/candidates_out/
+site/

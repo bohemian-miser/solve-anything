@@ -1,0 +1,53 @@
+name: Publish Frontier Dashboard
+
+on:
+  push:
+    branches: [main, claims]
+  schedule:
+    - cron: "15 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Fetch active claims.json (if claims branch exists)
+        run: |
+          if git ls-remote --exit-code --heads origin claims >/dev/null 2>&1; then
+            git fetch origin claims --depth=1
+            git show origin/claims:claims.json > /tmp/claims.json || true
+          fi
+
+      - name: Build static dashboard and frontier.json
+        run: |
+          if [ -f /tmp/claims.json ]; then
+            python3 scripts/build_dashboard.py --out site --claims /tmp/claims.json
+          else
+            python3 scripts/build_dashboard.py --out site
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

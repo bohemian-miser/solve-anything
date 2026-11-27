@@ -1,0 +1,14 @@
+name = "solve-anything"
+version = "0.1.0"
+defaultTargets = ["Challenge", "Problem"]
+
+[leanOptions]
+warningAsError = true
+autoImplicit = false
+relaxedAutoImplicit = false
+
+[[lean_lib]]
+name = "Challenge"
+
+[[lean_lib]]
+name = "Problem"
