@@ -30,6 +30,12 @@ jobs:
       - name: Check Lean source hygiene guards
         run: python3 scripts/check_source_guards.py
 
+      - name: Run native cache helper self-test (if present)
+        run: |
+          if [ -f scripts/native_cache.py ]; then
+            python3 scripts/native_cache.py --self-test
+          fi
+
       - name: Cache elan toolchain and Lake build artifacts
         uses: actions/cache@v4
         with:
