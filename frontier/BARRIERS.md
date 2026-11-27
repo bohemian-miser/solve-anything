@@ -1,15 +1,21 @@
 # Known Mathematical Barriers (`frontier/BARRIERS.md`)
 
-Every serious open conjecture has **relativization / variant barriers** — closely related problems where the analogous statement is **FALSE**. Any Track A (`Prove/`) argument that fails to distinguish the true problem from these false variants is automatically suspect.
+Every serious open conjecture sits beside **barrier regimes** — closely related variants, relaxed domains, or weaker obstructions where the analogous statement is **FALSE** or **provably insufficient**. Any Track A (`Prove/`) argument that fails to distinguish the true conjecture from these false or obstructed regimes is automatically suspect.
 
-## How to Use This File (When Initializing a New Conjecture)
+## The Five-Tier Barrier Checklist (Mandatory for New Conjecture Forks)
 
-List 3–6 concrete barriers for your problem and, wherever possible, **formalize the counterexample variants directly in Lean (`<LeanRoot>/Core/Barriers.lean`)** plus an automated millisecond red-team script in `search/`:
+When initializing a new conjecture, populate all five tiers below (`B1`–`B5`) and, wherever possible, **formalize concrete counterexample variants directly in Lean (`<LeanRoot>/Core/Barriers.lean`)** alongside a millisecond red-team script in `search/`:
 
-| Barrier | Nearby Variant / Obstruction | Known Failure / Counterexample | What a Valid Track A Proof Must Use |
+| Tier | Barrier Class | Failure Mode / Obstruction | What a Valid Track A Proof Must Establish |
 |---|---|---|---|
-| **B1 (Variant counterexample)** | *(Replace with a natural perturbed version of your conjecture that is false)* | *(Concrete Lean-verified counterexample)* | *(Exact property of the true conjecture broken in B1)* |
-| **B2 (Density / heuristic barrier)** | *(Almost-all / probabilistic / local-only methods that cannot rule out sparse counterexamples)* | *(Sparse or local counterexamples)* | *(Global / rigid obstruction)* |
-| **B3 (Known impossibility / undecidability)** | *(Generalization known to be undecidable or false)* | *(Published theorem)* | *(Exact specialization avoiding the general class)* |
+| **B1** | **Perturbed-Problem / Variant Counterexamples** | Nearby parameter, sign, coefficient, or boundary perturbations where the analogous statement is **FALSE**. | Pinpoint the exact structural property of the true conjecture that breaks in every false variant. |
+| **B2** | **Density / Probabilistic-vs-Universal Obstruction** | "Almost-all", statistical, ergodic, or measure-1 arguments that cannot exclude zero-density or sparse counterexamples. | Supply a deterministic global mechanism ruling out thin exceptional sets (not merely positive/full density). |
+| **B3** | **Domain-Boundary / Sign / Completion Counterexamples** | Counterexamples that emerge on enlarged or boundary domains (e.g., signed integers vs `ℕ⁺`, rationals/reals vs integers, degenerate base cases). | Explicitly invoke positivity, integrality, discreteness, or boundary side-conditions absent from the larger domain. |
+| **B4** | **Local-vs-Global / Completion Obstructions** | Statements satisfied locally (modulo `m`, in `p`-adic completions `ℤ_p`, or by finite-state automata) where local counterexamples or dense periodic points still exist. | Combine local constraints with an archimedean, global integrality, or height-rigidity obstruction. |
+| **B5** | **Computability / Finite-Horizon Limits** | Generalizations known to be undecidable, intractable, or unresolvable by bounded finite-horizon verification alone. | Isolate the exact specialization that escapes the undecidable class and cannot be proved by purely syntactic/uniform schemas. |
 
-See `bohemian-miser/solve-collatz` for a complete worked example (`3n - 1` cycle at `5`, `5n + 1` cycle at `13`, `ℤ_{<0}` cycle at `-5`, `ℤ₂` rational periodic points, and Conway undecidability).
+## How Swarms Must Use This File
+
+1. **Formalize witnesses in Core:** Prove concrete `B1`/`B3` counterexamples in `<LeanRoot>/Core/Barriers.lean` (zero `sorry`, zero `native_decide`) and audit them in `scripts/PrintAxioms.lean`.
+2. **Red-team before proving:** Run `bash search/ci_checks.sh` (and any problem-specific red-team harness in `search/`) against proposed invariants, bounds, or predicates *before* spending Lean prover compute.
+3. **Require explicit disposition in PRs:** Every Track A PR's `Quality pass: Q3` MUST state which tiers (`B1`–`B5`) apply and exactly where the argument fails on the excluded barrier regimes.
