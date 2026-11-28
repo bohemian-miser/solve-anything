@@ -16,6 +16,6 @@ When initializing a new conjecture, populate all five tiers below (`B1`–`B5`) 
 
 ## How Swarms Must Use This File
 
-1. **Formalize witnesses in Core:** Prove concrete `B1`/`B3` counterexamples in `<LeanRoot>/Core/Barriers.lean` (zero `sorry`, zero `native_decide`) and audit them in `scripts/PrintAxioms.lean`.
+1. **Formalize witnesses in Core:** Prove concrete `B1`/`B3` counterexamples in `<LeanRoot>/Core/Barriers.lean` (zero `sorry`, zero `native_decide`) (`scripts/audit_axioms.py` audits them automatically).
 2. **Red-team before proving:** Run `bash search/ci_checks.sh` (and any problem-specific red-team harness in `search/`) against proposed invariants, bounds, or predicates *before* spending Lean prover compute.
 3. **Require explicit disposition in PRs:** Every Track A PR's `Quality pass: Q3` MUST state which tiers (`B1`–`B5`) apply and exactly where the argument fails on the excluded barrier regimes.

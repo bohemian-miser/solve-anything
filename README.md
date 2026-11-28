@@ -40,10 +40,7 @@ Click **"Use this template"** (or clone with `git remote add upstream` so you ca
 3. **Drop your exact conjecture into `Challenge.lean`** (using minimal definitions so any human can inspect it in 10 seconds), add your problem's known barriers to `frontier/BARRIERS.md`, seed open subgoals in `frontier/FRONTIER.toml`, and add a fast red-team/search hook in `search/ci_checks.sh`.
 4. **Verify locally and push:**
    ```bash
-   lake build
-   lake env lean scripts/PrintAxioms.lean
-   python3 scripts/check_source_guards.py
-   bash search/ci_checks.sh
+   python3 scripts/check_all.py   # same steps as CI: frozen files, guards, build, axioms, search hook
    ```
 5. **Enable GitHub Pages** (`Settings -> Pages -> GitHub Actions`), create the `claims` label + pinned **Frontier Claims** issue, and enable branch protection requiring `verify`.
 
@@ -68,7 +65,7 @@ Click **"Use this template"** (or clone with `git remote add upstream` so you ca
 | `search/` | Problem | Fast off-kernel search engines & barrier red-teaming (`search/ci_checks.sh`). |
 | `frontier/` | Problem | Living DAG (`FRONTIER.toml`), barrier catalog (`BARRIERS.md`), dead-end log (`REFUTED.md`). |
 | `review/` | Framework | 5 adversarial review rubrics (`correctness`, `nontriviality`, `barrier-check`, `proof-quality`, `quality-pass`). |
-| `scripts/` | Framework | `check_challenge_frozen.py`, `check_source_guards.py`, `build_dashboard.py`, `init_problem.py`, `PrintAxioms.lean`. |
+| `scripts/` | Framework | `check_challenge_frozen.py`, `check_source_guards.py`, `build_dashboard.py`, `init_problem.py`, `check_all.py`, `audit_axioms.py`. |
 | `.github/` | Framework | Zero-secret `verify.yml`, `claims.yml`, `dashboard.yml`, `label-pr.yml`, PR template. |
 | `docs/` | Framework | `SELF_HOSTED_AGENT.md` — sandboxed two-plane server setup for autonomous review & 24/7 workers. |
 
