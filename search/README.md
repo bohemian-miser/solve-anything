@@ -8,3 +8,5 @@ Lean 4's kernel is the **judge**, not the search engine. Put fast off-kernel too
    - Search structured danger zones at native speed; if a candidate counterexample is ever found, emit a compact Lean 4 certificate checked strictly by `<LeanRoot>/Disprove/Cert.lean` (zero `sorry`, zero `native_decide`).
 3. **CI Integration (`search/ci_checks.sh`):**
    - `.github/workflows/verify.yml` automatically runs `search/ci_checks.sh` (configured via `problem.toml`). Keep CI smoke tests deterministic and fast (< 5 seconds).
+4. **Compiled engines (`search/engine.py`):**
+   - Build and run C engines with `compile_c` and `run_json_engine`, and check determinism with `check_thread_determinism`. `search/example_engine/` is a complete engine with its self-test; copy it to start a new one.

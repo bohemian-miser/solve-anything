@@ -15,6 +15,10 @@ if [ -f scripts/build_dashboard.py ]; then
   python3 scripts/build_dashboard.py --self-test
 fi
 
+if [ -f search/example_engine/run_example_engine.py ]; then
+  python3 search/example_engine/run_example_engine.py
+fi
+
 if [ -f search/verify_json_artifacts.py ]; then
   python3 search/verify_json_artifacts.py --self-test
   if [ -d search/logs ]; then
